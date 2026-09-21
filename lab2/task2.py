@@ -10,7 +10,7 @@ def draw_histogram(histogram, color, filename):
     plt.close()
 
 def task2():
-    image = Image.open("image.png")
+    image = Image.open("lab2/image.png")
     width, height = image.size
 
     histogram_r = [0] * 256
@@ -33,13 +33,13 @@ def task2():
             histogram_g[g] += 1
             histogram_b[b] += 1
     
-    image_r.save("image_r.png")
-    image_g.save("image_g.png")
-    image_b.save("image_b.png")
+    image_r.save("lab2/image_r.png")
+    image_g.save("lab2/image_g.png")
+    image_b.save("lab2/image_b.png")
 
-    draw_histogram(histogram_r, "red", "histogram_r.png")
-    draw_histogram(histogram_g, "green", "histogram_g.png")
-    draw_histogram(histogram_b, "blue", "histogram_b.png")
+    draw_histogram(histogram_r, "red", "lab2/histogram_r.png")
+    draw_histogram(histogram_g, "green", "lab2/histogram_g.png")
+    draw_histogram(histogram_b, "blue", "lab2/histogram_b.png")
 
     
 task2() 
