@@ -1,4 +1,3 @@
-
 import tkinter as tk
 from tkinter import filedialog
 from PIL import Image, ImageTk
@@ -240,63 +239,81 @@ def texture_click(event):
     update()
 
 
-# 1в. Поиск границы
-def neighbors(x, y):
-    return [
-        (x - 1, y - 1), (x, y - 1), (x + 1, y - 1),
-        (x + 1, y), (x + 1, y + 1), (x, y + 1),
-        (x - 1, y + 1), (x - 1, y)
-    ]
+# 1в. Выделение границы связной области (слайд 14 презентации)
+DIRS = [(1, 0), (1, -1), (0, -1), (-1, -1),
+        (-1, 0), (-1, 1), (0, 1), (1, 1)]
+
+boundary_points = []
+
+
+def is_border(x, y):
+    return 0 <= x < W and 0 <= y < H and img.getpixel((x, y)) == BORDER
+
+
+def find_start():
+    for x in range(W - 1, -1, -1):
+        for y in range(H):
+            if is_border(x, y):
+                return (x, y)
+    return None
+
+
+def trace_boundary(start):
+    points = [start]
+    cur = start
+    back = 0
+    first_next = None
+
+    for _ in range(8 * W * H):
+        found = None
+        prev_dir = None
+
+        for k in range(8):
+            nd = (back - k) % 8
+            nx, ny = cur[0] + DIRS[nd][0], cur[1] + DIRS[nd][1]
+            if is_border(nx, ny):
+                found = (nx, ny)
+                prev_dir = (nd + 1) % 8
+                break
+
+        if found is None:
+            break
+
+        if cur == start:
+            if first_next is None:
+                first_next = found
+            elif found == first_next:
+                break
+
+        bx = cur[0] + DIRS[prev_dir][0]
+        by = cur[1] + DIRS[prev_dir][1]
+        back = DIRS.index((bx - found[0], by - found[1]))
+
+        points.append(found)
+        cur = found
+
+    if len(points) > 1 and points[-1] == start:
+        points.pop()
+    return points
 
 
 def find_boundary():
-    start = None
+    global boundary_points
 
-    for y in range(H):
-        for x in range(W):
-            if img.getpixel((x, y)) == BORDER:
-                start = (x, y)
-                break
-        if start is not None:
-            break
-
+    start = find_start()
     if start is None:
         print("Граница не найдена")
         return
 
-    boundary = []
-    current = start
-    previous = None
+    boundary_points = trace_boundary(start)
 
-    for _ in range(W * H):
-        boundary.append(current)
-        x, y = current
-        next_point = None
+    print("Начальная точка:", start)
+    print("Количество точек границы:", len(boundary_points))
+    print("Точки границы (в порядке обхода):")
+    print(boundary_points)
 
-        for p in neighbors(x, y):
-            px, py = p
-
-            if (0 <= px < W and 0 <= py < H
-                    and img.getpixel((px, py)) == BORDER
-                    and p != previous):
-                next_point = p
-                break
-
-        if next_point is None:
-            break
-
-        if next_point == start:
-            break
-
-        previous = current
-        current = next_point
-
-    print("Точки границы:")
-    print(boundary)
-
-    for x, y in boundary:
-        if 0 <= x < W and 0 <= y < H:
-            img.putpixel((x, y), (0, 0, 255))
+    for x, y in boundary_points:
+        img.putpixel((x, y), (0, 0, 255))
 
     update()
 
