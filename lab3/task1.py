@@ -249,33 +249,26 @@ boundary_points = []
 def is_border(x, y):
     return 0 <= x < W and 0 <= y < H and img.getpixel((x, y)) == BORDER
 
-def find_start():
-    for x in range(W - 1, -1, -1):
-        for y in range(H):
-            if is_border(x, y):
-                return x, y
+def find_start(x, y):
+    while x < W:
+        if is_border(x, y):
+            return x, y
+        x += 1
     return None
 
 def trace_boundary(start):
     points = [start]
     cur = start
-
-    # Первое направление — вниз
     direction = 6
-
     first_move = None
 
     for _ in range(W * H * 8):
-        # 90 градусов вправо от направления прихода
         right = (direction - 2) % 8
-
         found = None
         new_direction = None
 
-        # От правого направления идём против часовой стрелки
         for k in range(8):
             d = (right + k) % 8
-
             nx = cur[0] + DIRS[d][0]
             ny = cur[1] + DIRS[d][1]
 
@@ -287,7 +280,6 @@ def trace_boundary(start):
         if found is None:
             break
 
-        # Запоминаем первый переход
         if first_move is None:
             first_move = (found, new_direction)
         elif cur == start and (found, new_direction) == first_move:
@@ -299,25 +291,32 @@ def trace_boundary(start):
 
     return points
 
-def find_boundary():
-    global boundary_points
+def boundary_click(event):
+    canvas.unbind("<Button-1>")
 
-    start = find_start()
+    start = find_start(event.x, event.y)
 
     if start is None:
-        print("Граница не найдена")
+        print("Граница справа от точки не найдена")
         return
 
+    global boundary_points
     boundary_points = trace_boundary(start)
 
-    print("Начальная точка:", start)
+    print("Точка клика:", (event.x, event.y))
+    print("Начальная точка границы:", start)
     print("Количество точек границы:", len(boundary_points))
+    print("Точки границы:")
     print(boundary_points)
 
     for x, y in boundary_points:
         img.putpixel((x, y), (0, 0, 255))
 
     update()
+
+def start_boundary():
+    canvas.unbind("<Button-1>")
+    canvas.bind("<Button-1>", boundary_click)
 
 
 
@@ -339,7 +338,7 @@ tk.Button(
 ).pack(side="left", padx=5)
 
 tk.Button(
-    buttons, text="1в — Найти границу", command=find_boundary
+    buttons, text="1в — Найти границу", command=start_boundary
 ).pack(side="left", padx=5)
 
 root.mainloop()
