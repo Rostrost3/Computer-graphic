@@ -239,68 +239,71 @@ def texture_click(event):
     update()
 
 
-# 1в. Выделение границы связной области (слайд 14 презентации)
+# 1в. Выделение границы связной области
+
 DIRS = [(1, 0), (1, -1), (0, -1), (-1, -1),
         (-1, 0), (-1, 1), (0, 1), (1, 1)]
 
 boundary_points = []
 
-
 def is_border(x, y):
     return 0 <= x < W and 0 <= y < H and img.getpixel((x, y)) == BORDER
-
 
 def find_start():
     for x in range(W - 1, -1, -1):
         for y in range(H):
             if is_border(x, y):
-                return (x, y)
+                return x, y
     return None
-
 
 def trace_boundary(start):
     points = [start]
     cur = start
-    back = 0
-    first_next = None
 
-    for _ in range(8 * W * H):
+    # Первое направление — вниз
+    direction = 6
+
+    first_move = None
+
+    for _ in range(W * H * 8):
+        # 90 градусов вправо от направления прихода
+        right = (direction - 2) % 8
+
         found = None
-        prev_dir = None
+        new_direction = None
 
+        # От правого направления идём против часовой стрелки
         for k in range(8):
-            nd = (back - k) % 8
-            nx, ny = cur[0] + DIRS[nd][0], cur[1] + DIRS[nd][1]
+            d = (right + k) % 8
+
+            nx = cur[0] + DIRS[d][0]
+            ny = cur[1] + DIRS[d][1]
+
             if is_border(nx, ny):
                 found = (nx, ny)
-                prev_dir = (nd + 1) % 8
+                new_direction = d
                 break
 
         if found is None:
             break
 
-        if cur == start:
-            if first_next is None:
-                first_next = found
-            elif found == first_next:
-                break
-
-        bx = cur[0] + DIRS[prev_dir][0]
-        by = cur[1] + DIRS[prev_dir][1]
-        back = DIRS.index((bx - found[0], by - found[1]))
+        # Запоминаем первый переход
+        if first_move is None:
+            first_move = (found, new_direction)
+        elif cur == start and (found, new_direction) == first_move:
+            break
 
         points.append(found)
         cur = found
+        direction = new_direction
 
-    if len(points) > 1 and points[-1] == start:
-        points.pop()
     return points
-
 
 def find_boundary():
     global boundary_points
 
     start = find_start()
+
     if start is None:
         print("Граница не найдена")
         return
@@ -309,13 +312,14 @@ def find_boundary():
 
     print("Начальная точка:", start)
     print("Количество точек границы:", len(boundary_points))
-    print("Точки границы (в порядке обхода):")
     print(boundary_points)
 
     for x, y in boundary_points:
         img.putpixel((x, y), (0, 0, 255))
 
     update()
+
+
 
 
 # Кнопки
