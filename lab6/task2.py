@@ -95,19 +95,6 @@ def rotation_about_line(p1, p2, angle):
     return about_point(R, p1)
 
 
-def rotation_about_line_decomposed(p1, p2, angle):
-    l, m, n = _direction(p1, p2)
-    d = math.hypot(m, n)
-    psi = math.atan2(m, n) if d > 1e-12 else 0.0   # cosψ = n/d, sinψ = m/d
-    theta = math.atan2(-l, d)                      # cosθ = d,   sinθ = -l
-    M = translation(-p1[0], -p1[1], -p1[2])
-    for step in (rotation_x(psi), rotation_y(theta), rotation_z(angle),
-                 rotation_y(-theta), rotation_x(-psi),
-                 translation(p1[0], p1[1], p1[2])):
-        M = mat_mul(M, step)
-    return M
-
-
 
 def _xyz(p):
     if hasattr(p, "x"):
@@ -142,9 +129,7 @@ def translate(poly, dx, dy, dz):
 
 
 def rotate_about_origin(poly, ax_deg, ay_deg, az_deg):
-    M = mat_mul(mat_mul(rotation_x(math.radians(ax_deg)),
-                        rotation_y(math.radians(ay_deg))),
-                rotation_z(math.radians(az_deg)))
+    M = mat_mul(mat_mul(rotation_x(math.radians(ax_deg)), rotation_y(math.radians(ay_deg))), rotation_z(math.radians(az_deg)))
     return transform(poly, M)
 
 
@@ -166,59 +151,4 @@ def rotate_about_center_axis(poly, axis, angle_deg):
 
 
 def rotate_about_line(poly, p1, p2, angle_deg):
-    """p1, p2 — Point3D или кортежи (x, y, z)."""
     return transform(poly, rotation_about_line(_xyz(p1), _xyz(p2), math.radians(angle_deg)))
-
-
-
-if __name__ == "__main__":
-    def pts(poly):
-        return [(p.x, p.y, p.z) for p in poly.vertices]
-
-    def close(a, b, eps=1e-9):
-        return all(abs(u - v) < eps for p, q in zip(a, b) for u, v in zip(p, q))
-
-    cube = make_cube(1.0)
-
-    p1, p2, ang = (0.3, -1.0, 2.0), (2.0, 1.5, -0.5), math.radians(37)
-    A = rotation_about_line(p1, p2, ang)
-    B = rotation_about_line_decomposed(p1, p2, ang)
-    print("Формула == разложение по лекции:",
-          all(abs(A[i][j] - B[i][j]) < 1e-9 for i in range(4) for j in range(4)))
-
-    from_poly = type(cube.vertices[0])
-    line_pts = [from_poly(*p1), from_poly(*p2)]
-    tmp = copy.deepcopy(cube)
-    tmp.vertices = line_pts
-    tmp.faces = []
-    print("Точки оси неподвижны:", close(pts(transform(tmp, A)), [p1, p2]))
-
-    def edge_lengths(poly):
-        v = poly.vertices
-        return sorted(round(math.dist((v[a].x, v[a].y, v[a].z), (v[b].x, v[b].y, v[b].z)), 9)
-                      for a, b in poly.edges)
-    print("Длины рёбер сохраняются:",
-          edge_lengths(cube) == edge_lengths(rotate_about_line(cube, p1, p2, 37)))
-
-    scaled = scale_about_center(cube, 2)
-    print("Центр после масштаба:", scaled.get_center(), "| ребро x2:",
-          edge_lengths(scaled)[0] == 2 * edge_lengths(cube)[0])
-
-    r = cube
-    for _ in range(4):
-        r = rotate_about_center_axis(r, "y", 90)
-    print("4 x 90° = исходная фигура:", close(pts(r), pts(cube)))
-
-    def outward(poly):
-        c = poly.get_center()
-        res = []
-        for f in poly.faces:
-            n = f.get_normal(poly.vertices)
-            p = poly.vertices[f.indices[0]]
-            res.append(n[0]*(p.x-c.x) + n[1]*(p.y-c.y) + n[2]*(p.z-c.z) > 0)
-        return res
-
-    for name, gen in POLYHEDRONS.items():
-        fig = gen(1.0)
-        print(f"Отражение XY, {name:15}: ориентация граней сохранена = "
-              f"{outward(fig) == outward(reflect(fig, 'xy'))}")
