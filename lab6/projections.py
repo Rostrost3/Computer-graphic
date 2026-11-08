@@ -1,7 +1,4 @@
-"""Проекции для векторов-строк (x, y, z, 1), как в task2.py."""
-
 import math
-
 from task2 import mat_mul, rotation_x, rotation_y
 
 

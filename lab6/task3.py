@@ -1,5 +1,3 @@
-"""Отрисовка и интерфейс лабораторной №6. Запуск: python lab6/task3.py."""
-
 import math
 import tkinter as tk
 from tkinter import messagebox, ttk
