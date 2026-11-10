@@ -1,12 +1,21 @@
 import math
+import os
+import sys
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
-EPS = 1e-9
-model = {"v": [], "f": [], "e": [], "base_v": [], "base_f": []}
-view = {"rx": 0.4, "ry": -0.6, "scale": 90.0, "drag": None}
-ui = {}
-DEFAULT_PROFILE = "0 -1\n1 -1\n1.5 0\n1 1\n0 1"
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(root_dir, 'lab6'))
+sys.path.insert(1, root_dir)
+
+from lab6.main import Point3D, Polygon, Polyhedron
+from lab6 import task2
+from lab6.projections import axonometric_matrix, perspective_matrix, project_edge, project_vertices
+
+poly = None
+base = None
+size = 1.0
+zoom = 1.0
 
 
 
@@ -20,48 +29,37 @@ def rotate_point(p, axis, a):
     return (x * c - y * s, x * s + y * c, z)
 
 
-def parse_profile(text, axis):
-    pts = []
+def parse_profile(text):
+    points = []
     for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            nums = [float(v) for v in line.replace(",", ".").split()]
-        except ValueError:
-            raise ValueError(f"Не удалось прочитать строку: '{line}'")
-        if len(nums) == 3:
-            pts.append(tuple(nums))
-        elif len(nums) == 2:
-            r, h = nums
-            pts.append({"x": (h, r, 0.0), "y": (r, h, 0.0), "z": (r, 0.0, h)}[axis])
-        else:
-            raise ValueError(f"В строке '{line}' нужно 2 или 3 числа")
-    return pts
-
-
-def on_axis(p, axis):
-    i = "xyz".index(axis)
-    return math.sqrt(sum(p[j] ** 2 for j in range(3) if j != i)) < EPS
+        if line.strip():
+            try:
+                r, h = map(float, line.replace(",", ".").split())
+            except ValueError:
+                raise ValueError(f"Строка '{line}': нужно два числа")
+            points.append((r, h))
+    return points
 
 
 def build_revolution(profile, axis, n):
     if len(profile) < 2:
-        raise ValueError("В образующей должно быть минимум 2 точки")
+        raise ValueError("В образующей минимум 2 точки")
     if n < 3:
-        raise ValueError("Разбиений должно быть не меньше 3")
+        raise ValueError("Разбиений минимум 3")
 
-    step = math.radians(360.0 / n)
-    verts, table = [], []
-    for p in profile:
-        if on_axis(p, axis):
-            verts.append(tuple(p))
+    step = math.radians(360 / n)
+    verts = []
+    table = []
+    for r, h in profile:
+        p = {"x": (h, r, 0), "y": (r, h, 0), "z": (r, 0, h)}[axis]
+        if abs(r) < 1e-9:
+            verts.append(Point3D(*p))
             table.append([len(verts) - 1] * n)
         else:
             row = []
             for k in range(n):
                 row.append(len(verts))
-                verts.append(rotate_point(p, axis, step * k))
+                verts.append(Point3D(*rotate_point(p, axis, step * k)))
             table.append(row)
 
     faces = []
@@ -71,47 +69,29 @@ def build_revolution(profile, axis, n):
             quad = [table[i][k], table[i + 1][k], table[i + 1][k2], table[i][k2]]
             face = [v for j, v in enumerate(quad) if v != quad[j - 1]]
             if len(face) >= 3:
-                faces.append(face)
+                faces.append(Polygon(face))
 
-    c = center(verts)
-    s = 0.0
+    figure = Polyhedron(verts, faces, f"Фигура вращения ({axis}, {n})")
+
+    c = figure.get_center()
+    s = 0
     for f in faces:
-        nrm = normal(verts, f)
-        p = verts[f[0]]
-        s += sum(nrm[i] * (p[i] - c[i]) for i in range(3))
+        nx, ny, nz = f.get_normal(verts)
+        p = verts[f.indices[0]]
+        s += nx * (p.x - c.x) + ny * (p.y - c.y) + nz * (p.z - c.z)
     if s < 0:
-        faces = [f[::-1] for f in faces]
-    return verts, faces
-
-
-def normal(verts, face):
-    p0, p1, p2 = verts[face[0]], verts[face[1]], verts[face[2]]
-    u = [p1[i] - p0[i] for i in range(3)]
-    w = [p2[i] - p0[i] for i in range(3)]
-    return (u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0])
-
-
-def center(verts):
-    n = len(verts)
-    return tuple(sum(p[i] for p in verts) / n for i in range(3))
-
-
-def edges_of(faces):
-    es = set()
-    for f in faces:
-        for i in range(len(f)):
-            a, b = f[i], f[(i + 1) % len(f)]
-            es.add((min(a, b), max(a, b)))
-    return list(es)
+        for f in faces:
+            f.indices.reverse()
+    return figure
 
 
 
-def save_obj(path, verts, faces):
+def save_obj(figure, path):
     with open(path, "w", encoding="utf-8") as f:
-        for x, y, z in verts:
-            f.write(f"v {x:.6f} {y:.6f} {z:.6f}\n")
-        for face in faces:
-            f.write("f " + " ".join(str(i + 1) for i in face) + "\n")
+        for p in figure.vertices:
+            f.write(f"v {p.x:.6f} {p.y:.6f} {p.z:.6f}\n")
+        for face in figure.faces:
+            f.write("f " + " ".join(str(i + 1) for i in face.indices) + "\n")
 
 
 def load_obj(path):
@@ -119,249 +99,195 @@ def load_obj(path):
     with open(path, encoding="utf-8") as f:
         for line in f:
             t = line.split()
-            if not t:
-                continue
-            if t[0] == "v":
-                verts.append(tuple(map(float, t[1:4])))
-            elif t[0] == "f":
-                faces.append([int(s.split("/")[0]) - 1 for s in t[1:]])
-    if not verts or not faces:
-        raise ValueError("В файле нет вершин или граней")
-    return verts, faces
+            if t and t[0] == "v":
+                verts.append(Point3D(*map(float, t[1:4])))
+            elif t and t[0] == "f":
+                faces.append(Polygon([int(s.split("/")[0]) - 1 for s in t[1:]]))
+    if not verts or not faces or any(not 0 <= i < len(verts) for f in faces for i in f.indices):
+        raise ValueError("Некорректный OBJ-файл")
+    return Polyhedron(verts, faces, "Загруженная модель")
 
-
-
-def move(dx, dy, dz):
-    model["v"] = [(x + dx, y + dy, z + dz) for x, y, z in model["v"]]
-
-
-def rotate_about_center(axis, deg):
-    cx, cy, cz = center(model["v"])
-    a = math.radians(deg)
-    out = []
-    for x, y, z in model["v"]:
-        rx, ry, rz = rotate_point((x - cx, y - cy, z - cz), axis, a)
-        out.append((rx + cx, ry + cy, rz + cz))
-    model["v"] = out
-
-
-def scale_about_center(k):
-    cx, cy, cz = center(model["v"])
-    model["v"] = [(cx + (x - cx) * k, cy + (y - cy) * k, cz + (z - cz) * k)
-                  for x, y, z in model["v"]]
-
-
-def reflect(plane):
-    i = {"yz": 0, "xz": 1, "xy": 2}[plane]
-    model["v"] = [tuple(-p[j] if j == i else p[j] for j in range(3)) for p in model["v"]]
-    model["f"] = [f[::-1] for f in model["f"]]
-
-
-
-def project(x, y, z):
-    cy, sy = math.cos(view["ry"]), math.sin(view["ry"])
-    cx, sx = math.cos(view["rx"]), math.sin(view["rx"])
-    x, z = x * cy + z * sy, -x * sy + z * cy
-    y, z = y * cx - z * sx, y * sx + z * cx
-    k = view["scale"]
-    x, y, z = x * k, y * k, z * k
-    f = 1000 / max(1000 - z, 100)
-    c = ui["canvas"]
-    return c.winfo_width() / 2 + x * f, c.winfo_height() / 2 - y * f
 
 
 def draw(_=None):
-    c = ui["canvas"]
-    c.delete("all")
-    L = 150 / view["scale"]
-    x0, y0 = project(0, 0, 0)
-    for vec, color, name in (((L, 0, 0), "red", "X"), ((0, L, 0), "green", "Y"),
-                             ((0, 0, L), "blue", "Z")):
-        x1, y1 = project(*vec)
-        c.create_line(x0, y0, x1, y1, fill=color, width=2, arrow="last")
-        c.create_text(x1 + 8, y1 - 8, text=name, fill=color)
-    if model["v"]:
-        pts = [project(*p) for p in model["v"]]
-        for a, b in model["e"]:
-            c.create_line(*pts[a], *pts[b], fill="#333")
-        c.create_text(10, 10, anchor="nw",
-                      text=f"вершин: {len(model['v'])}, рёбер: {len(model['e'])}, "
-                           f"граней: {len(model['f'])}")
+    canvas.delete("all")
+    if poly is None:
+        return
+    if projection_box.get() == "Перспективная":
+        matrix = perspective_matrix(6.0 * size)
+    else:
+        matrix = axonometric_matrix()
+    points = project_vertices(poly.vertices, matrix)
+    w, h = canvas.winfo_width(), canvas.winfo_height()
+    scale = min(w, h) / 8 / size * zoom
+    for a, b in poly.edges:
+        edge = project_edge(points[a], points[b])
+        if edge:
+            (x0, y0), (x1, y1) = edge
+            canvas.create_line(w / 2 + x0 * scale, h / 2 - y0 * scale, w / 2 + x1 * scale, h / 2 - y1 * scale, fill="#24578a", width=2)
+    canvas.create_text(10, 10, anchor="nw", text=f"вершин: {len(poly.vertices)}, граней: {len(poly.faces)}")
 
 
-def set_model(verts, faces):
-    model.update(v=verts, f=faces, e=edges_of(faces), base_v=verts, base_f=faces)
-    r = max(math.sqrt(x * x + y * y + z * z) for x, y, z in verts)
-    view["scale"] = 200 / max(r, 1e-6)
+def set_model(new):
+    global poly, base, size, zoom
+    poly = base = new
+    r = max(math.sqrt(p.x ** 2 + p.y ** 2 + p.z ** 2) for p in new.vertices)
+    size = max(r, 0.1) / 1.7
+    zoom = 1.0
     draw()
 
 
-
-def num(entry):
+def numbers(entry_list):
     try:
-        return float(entry.get().replace(",", "."))
+        return [float(e.get().replace(",", ".")) for e in entry_list]
     except ValueError:
-        raise ValueError(f"'{entry.get()}' - не число")
+        raise ValueError("Введите числа")
 
 
 def safe(fn):
-    """Оборачивает действие: ошибки показываются окном, а не падением программы."""
     def wrapper():
         try:
             fn()
-        except (ValueError, OSError) as e:
+        except (ValueError, OSError, ZeroDivisionError, OverflowError) as e:
             messagebox.showerror("Ошибка", str(e))
     return wrapper
 
 
-def need_model():
-    if not model["v"]:
+def apply(operation, *args):
+    global poly
+    if poly is None:
         raise ValueError("Сначала постройте или загрузите модель")
+    poly = operation(poly, *args)
+    draw()
 
 
 def on_build():
-    axis = ui["axis"].get()
-    profile = parse_profile(ui["profile"].get("1.0", "end"), axis)
-    set_model(*build_revolution(profile, axis, int(num(ui["n"]))))
+    axis = axis_box.get()
+    set_model(build_revolution(parse_profile(profile_text.get("1.0", "end")), axis, int(numbers([n_entry])[0])))
 
 
 def on_save():
-    need_model()
+    if poly is None:
+        raise ValueError("Нечего сохранять")
     path = filedialog.asksaveasfilename(defaultextension=".obj", filetypes=[("OBJ", "*.obj")])
     if path:
-        save_obj(path, model["v"], model["f"])
+        save_obj(poly, path)
 
 
 def on_load():
     path = filedialog.askopenfilename(filetypes=[("OBJ", "*.obj")])
     if path:
-        set_model(*load_obj(path))
-
-
-def on_move():
-    need_model()
-    move(*[num(e) for e in ui["mv"]])
-    draw()
-
-
-def on_rotate():
-    need_model()
-    rotate_about_center(ui["rot_axis"].get(), num(ui["rot_angle"]))
-    draw()
-
-
-def on_scale():
-    need_model()
-    scale_about_center(num(ui["k"]))
-    draw()
-
-
-def on_reflect():
-    need_model()
-    reflect(ui["plane"].get())
-    draw()
+        set_model(load_obj(path))
 
 
 def on_reset():
-    if model["base_v"]:
-        model.update(v=model["base_v"], f=model["base_f"])
+    global poly
+    if base is not None:
+        poly = base
         draw()
 
 
-def on_press(e):
-    view["drag"] = (e.x, e.y)
-
-
-def on_drag(e):
-    if view["drag"]:
-        view["ry"] += (e.x - view["drag"][0]) * 0.01
-        view["rx"] += (e.y - view["drag"][1]) * 0.01
-        view["drag"] = (e.x, e.y)
-        draw()
-
-
-def zoom(k):
-    view["scale"] *= k
+def change_zoom(k):
+    global zoom
+    zoom *= k
     draw()
 
 
 
-def field(parent, value, width=5):
-    e = ttk.Entry(parent, width=width)
-    e.insert(0, value)
-    e.pack(side="left", padx=2)
-    return e
+def entries(parent, labels, defaults):
+    row = ttk.Frame(parent)
+    row.pack(fill="x", pady=2)
+    result = []
+    for label, default in zip(labels, defaults):
+        cell = ttk.Frame(row)
+        cell.pack(side="left", padx=3)
+        ttk.Label(cell, text=label).pack(anchor="w")
+        e = ttk.Entry(cell, width=6)
+        e.insert(0, str(default))
+        e.pack()
+        result.append(e)
+    return result
 
 
-def combo(parent, values, default, width):
+def combo(parent, values, default, width=6):
     cb = ttk.Combobox(parent, values=values, width=width, state="readonly")
     cb.set(default)
-    cb.pack(side="left", padx=2)
+    cb.pack(anchor="w", pady=2)
     return cb
 
 
-def button(parent, text, cmd):
-    ttk.Button(parent, text=text, command=safe(cmd)).pack(fill="x", pady=2)
+def button(parent, text, command):
+    ttk.Button(parent, text=text, command=safe(command)).pack(fill="x", pady=2)
 
 
-root = tk.Tk()
-root.title("Фигура вращения")
-left = ttk.Frame(root, padding=8)
+def group(parent, title):
+    frame = ttk.LabelFrame(parent, text=title, padding=6)
+    frame.pack(fill="x", pady=4)
+    return frame
+
+
+window = tk.Tk()
+window.title("Лаба 7. Фигура вращения")
+window.geometry("1100x720")
+left = ttk.Frame(window, padding=8)
 left.pack(side="left", fill="y")
-c = tk.Canvas(root, width=700, height=600, bg="white")
-c.pack(side="right", fill="both", expand=True)
-ui["canvas"] = c
+canvas = tk.Canvas(window, width=700, height=600, bg="white")
+canvas.pack(side="right", fill="both", expand=True)
 
-ttk.Label(left, text="Образующая (точка в строке):").pack(anchor="w")
-ttk.Label(left, foreground="gray",
-            text="2 числа: расстояние от оси, высота\n3 числа: x y z").pack(anchor="w")
-ui["profile"] = tk.Text(left, width=24, height=7)
-ui["profile"].insert("1.0", DEFAULT_PROFILE)
-ui["profile"].pack(pady=4)
+tabs = ttk.Notebook(left)
+tabs.pack(fill="both", expand=True)
+tab_build = ttk.Frame(tabs, padding=6)
+tab_move = ttk.Frame(tabs, padding=6)
+tab_line = ttk.Frame(tabs, padding=6)
+tabs.add(tab_build, text="Фигура")
+tabs.add(tab_move, text="Преобразования")
+tabs.add(tab_line, text="Прямая")
+button(left, "Сбросить к исходной", on_reset)
 
-r = ttk.Frame(left)
-r.pack(fill="x")
-ttk.Label(r, text="Ось:").pack(side="left")
-ui["axis"] = combo(r, ["x", "y", "z"], "y", 3)
-ttk.Label(r, text="Разбиений:").pack(side="left")
-ui["n"] = field(r, "24")
+# вкладка "Фигура"
+ttk.Label(tab_build, text="Образующая (точка в строке):").pack(anchor="w")
+ttk.Label(tab_build, foreground="gray",
+          text="два числа: расстояние от оси, высота").pack(anchor="w")
+profile_text = tk.Text(tab_build, width=24, height=6)
+profile_text.insert("1.0", "0 -1\n1 -1\n1.5 0\n1 1\n0 1")
+profile_text.pack(pady=4)
+ttk.Label(tab_build, text="Ось вращения").pack(anchor="w")
+axis_box = combo(tab_build, ["x", "y", "z"], "y")
+n_entry, = entries(tab_build, ["Разбиений"], [24])
+ttk.Label(tab_build, text="Проекция").pack(anchor="w")
+projection_box = combo(tab_build, ["Аксонометрическая", "Перспективная"], "Аксонометрическая", 20)
+projection_box.bind("<<ComboboxSelected>>", draw)
+button(tab_build, "Построить", on_build)
+button(tab_build, "Сохранить в .obj", on_save)
+button(tab_build, "Загрузить из .obj", on_load)
 
-button(left, "Построить", on_build)
-button(left, "Сохранить в .obj", on_save)
-button(left, "Загрузить из .obj", on_load)
+box = group(tab_move, "Смещение")
+shift = entries(box, ["dx", "dy", "dz"], [0.5, 0, 0])
+button(box, "Применить", lambda: apply(task2.translate, *numbers(shift)))
 
-box = ttk.LabelFrame(left, text="Аффинные преобразования", padding=6)
-box.pack(fill="x", pady=8)
+box = group(tab_move, "Вращение через центр")
+rot_axis = combo(box, ["x", "y", "z"], "y")
+rot_angle = entries(box, ["Угол, °"], [30])
+button(box, "Применить", lambda: apply(task2.rotate_about_center_axis, rot_axis.get(), numbers(rot_angle)[0]))
 
-f = ttk.Frame(box); f.pack(fill="x")
-ttk.Label(f, text="dx dy dz").pack(side="left")
-ui["mv"] = [field(f, v) for v in ("0.5", "0", "0")]
-button(box, "Сместить", on_move)
+box = group(tab_move, "Масштаб относительно центра")
+scale_k = entries(box, ["kx", "ky", "kz"], [1.5, 1.5, 1.5])
+button(box, "Применить", lambda: apply(task2.scale_about_center, *numbers(scale_k)))
 
-f = ttk.Frame(box); f.pack(fill="x")
-ttk.Label(f, text="Ось, угол°").pack(side="left")
-ui["rot_axis"] = combo(f, ["x", "y", "z"], "y", 3)
-ui["rot_angle"] = field(f, "30")
-button(box, "Повернуть вокруг оси через центр", on_rotate)
+box = group(tab_move, "Отражение относительно плоскости")
+plane = combo(box, ["xy", "xz", "yz"], "xy")
+button(box, "Применить", lambda: apply(task2.reflect, plane.get()))
 
-f = ttk.Frame(box); f.pack(fill="x")
-ttk.Label(f, text="Коэффициент").pack(side="left")
-ui["k"] = field(f, "1.5")
-button(box, "Масштабировать от центра", on_scale)
+box = group(tab_line, "Поворот вокруг прямой через две точки")
+point1 = entries(box, ["x1", "y1", "z1"], [0, 0, 0])
+point2 = entries(box, ["x2", "y2", "z2"], [1, 1, 0])
+angle = entries(box, ["Угол, °"], [30])
+button(box, "Применить", lambda: apply(task2.rotate_about_line, numbers(point1), numbers(point2), numbers(angle)[0]))
 
-f = ttk.Frame(box); f.pack(fill="x")
-ttk.Label(f, text="Плоскость").pack(side="left")
-ui["plane"] = combo(f, ["xy", "yz", "xz"], "xy", 4)
-button(box, "Отразить", on_reflect)
-
-button(box, "Сбросить к исходной", on_reset)
-
-c.bind("<Configure>", draw)
-c.bind("<ButtonPress-1>", on_press)
-c.bind("<B1-Motion>", on_drag)
-c.bind("<MouseWheel>", lambda e: zoom(1.1 if e.delta > 0 else 1 / 1.1))
-c.bind("<Button-4>", lambda e: zoom(1.1))
-c.bind("<Button-5>", lambda e: zoom(1 / 1.1))
+canvas.bind("<Configure>", draw)
+canvas.bind("<MouseWheel>", lambda e: change_zoom(1.1 if e.delta > 0 else 1 / 1.1))
+canvas.bind("<Button-4>", lambda e: change_zoom(1.1))
+canvas.bind("<Button-5>", lambda e: change_zoom(1 / 1.1))
 
 safe(on_build)()
-root.mainloop()
+window.mainloop()
