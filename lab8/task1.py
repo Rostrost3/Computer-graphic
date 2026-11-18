@@ -41,8 +41,8 @@ class Application(ttk.Frame):
         self.culling = tk.BooleanVar(value=True)
         self.show_normals = tk.BooleanVar(value=True)
         self.spin = tk.BooleanVar(value=True)
-        self.azimuth = tk.DoubleVar(value=30)    # направление обзора: азимут
-        self.elevation = tk.DoubleVar(value=25)  # направление обзора: высота
+        self.azimuth = tk.DoubleVar(value=30)    # угол поворота камеры вокруг оси Z
+        self.elevation = tk.DoubleVar(value=25)  # наклон камеры вверх/вниз
         self.polyhedron = None
         self.radius = 1.0
         self._build_interface()
@@ -185,7 +185,7 @@ class Application(ttk.Frame):
                 light = 0.4 + 0.6 * max(0.0, dot(n, v))
                 fill = "#%02x%02x%02x" % tuple(int(c * light) for c in (120, 180, 240))
             else:
-                fill = ""  # без отсечения рисуем каркас, чтобы были видны все рёбра
+                fill = ""
             self.canvas.create_polygon(*coords, fill=fill, outline="#24578a", width=2)
 
             if self.show_normals.get():

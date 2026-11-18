@@ -18,47 +18,110 @@ from lab6.projections import (axonometric_matrix, perspective_matrix, project_ed
 
 def load_obj(path):
     vertices, faces = [], []
+    vn_list = []
+    vt_list = []
+
     with open(path, encoding="utf-8") as file:
         for line_number, raw in enumerate(file, start=1):
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
             parts = line.split()
+
             if parts[0] == "v":
                 try:
                     x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
                 except (IndexError, ValueError):
                     raise ValueError(f"Строка {line_number}: плохая вершина") from None
                 vertices.append(Point3D(x, y, z))
+
+            elif parts[0] == "vn":  # Читаем нормали
+                try:
+                    vn_list.append((float(parts[1]), float(parts[2]), float(parts[3])))
+                except (IndexError, ValueError):
+                    raise ValueError(f"Строка {line_number}: плохая нормаль") from None
+
+            elif parts[0] == "vt":  # Читаем текстурные координаты
+                try:
+                    vt_list.append((float(parts[1]), float(parts[2])))
+                except (IndexError, ValueError):
+                    raise ValueError(f"Строка {line_number}: плохая текстура") from None
+
             elif parts[0] == "f":
                 indices = []
+                face_vn = None
+                face_vt = None
+
                 for token in parts[1:]:
+                    components = token.split("/")
+
                     try:
-                        idx = int(token.split("/")[0])
+                        idx = int(components[0])
+                        if idx == 0: raise ValueError
+                        indices.append(idx - 1)
                     except ValueError:
-                        raise ValueError(f"Строка {line_number}: плохой индекс") from None
-                    if idx == 0:
-                        raise ValueError(f"Строка {line_number}: индексы с 1")
-                    indices.append(idx - 1)
+                        raise ValueError(f"Строка {line_number}: плохой индекс вершины") from None
+
+                    if len(components) > 1 and components[1]:
+                        try:
+                            face_vt = int(components[1]) - 1
+                        except ValueError:
+                            pass
+                    if len(components) > 2 and components[2]:
+                        try:
+                            face_vn = int(components[2]) - 1
+                        except ValueError:
+                            pass
+
                 if len(indices) < 3:
                     raise ValueError(f"Строка {line_number}: мало вершин в грани")
-                faces.append(Polygon(indices))
+
+                face = Polygon(indices)
+                face.vn_index = face_vn
+                face.vt_index = face_vt
+                faces.append(face)
+
     if not vertices or not faces:
         raise ValueError("В файле нет вершин или граней")
-    n = len(vertices)
-    for face in faces:
-        for idx in face.indices:
-            if not 0 <= idx < n:
-                raise ValueError(f"Индекс {idx + 1} вне диапазона (всего {n})")
-    return Polyhedron(vertices, faces, name="Загруженная модель")
+
+    model = Polyhedron(vertices, faces, name="Загруженная модель")
+    model.vn_list = vn_list
+    model.vt_list = vt_list
+    return model
 
 
 def save_obj(polyhedron, path):
+    vn_list = getattr(polyhedron, 'vn_list', [])
+    vt_list = getattr(polyhedron, 'vt_list', [])
+
     with open(path, "w", encoding="utf-8") as file:
         for p in polyhedron.vertices:
             file.write(f"v {p.x:.6f} {p.y:.6f} {p.z:.6f}\n")
+
+        for vn in vn_list:
+            file.write(f"vn {vn[0]:.6f} {vn[1]:.6f} {vn[2]:.6f}\n")
+
+        for vt in vt_list:
+            file.write(f"vt {vt[0]:.6f} {vt[1]:.6f}\n")
+
         for face in polyhedron.faces:
-            file.write("f " + " ".join(str(i + 1) for i in face.indices) + "\n")
+            tokens = []
+            for idx in face.indices:
+                v_idx = idx + 1
+
+                vt_idx = getattr(face, 'vt_index', -1)
+                vn_idx = getattr(face, 'vn_index', -1)
+
+                if vt_idx is not None and vt_idx >= 0 and vn_idx is not None and vn_idx >= 0:
+                    tokens.append(f"{v_idx}/{vt_idx + 1}/{vn_idx + 1}")
+                elif vn_idx is not None and vn_idx >= 0:
+                    tokens.append(f"{v_idx}//{vn_idx + 1}")
+                elif vt_idx is not None and vt_idx >= 0:
+                    tokens.append(f"{v_idx}/{vt_idx + 1}")
+                else:
+                    tokens.append(str(v_idx))
+
+            file.write("f " + " ".join(tokens) + "\n")
 
 
 class Application(ttk.Frame):
