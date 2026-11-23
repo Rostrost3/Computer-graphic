@@ -11,8 +11,9 @@ sys.path.insert(1, project_root)
 from lab6.main import POLYHEDRONS
 from lab6 import task2
 
-SIZE = 480
+SIZE = 480  # размер изображения в пикселях
 
+# Направление обзора (от объекта к наблюдателю) и оси экрана
 AZIMUTH, ELEVATION = math.radians(30), math.radians(25)
 VIEW = (math.cos(ELEVATION) * math.sin(AZIMUTH), math.sin(ELEVATION),
         math.cos(ELEVATION) * math.cos(AZIMUTH))
@@ -26,6 +27,12 @@ def dot(a, b):
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
+def cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0])
+
+
 def sub(a, b):
     return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
@@ -34,14 +41,14 @@ def xyz(p):
     return (p.x, p.y, p.z)
 
 
+# --- текстура: шахматная доска, цвет зависит от (u, v), чтобы была видна ориентация ---
 def make_texture(n=64):
     texture = []
     for j in range(n):
         row = []
         for i in range(n):
             k = 1.0 if (i // 8 + j // 8) % 2 == 0 else 0.55
-            r, g, b = 255 * i / (n - 1), 255 * j / (n - 1), 160
-            row.append("#%02x%02x%02x" % (int(r * k), int(g * k), int(b * k)))
+            row.append((255 * i / (n - 1) * k, 255 * j / (n - 1) * k, 160 * k))
         texture.append(row)
     return texture
 
@@ -50,40 +57,69 @@ TEXTURE = make_texture()
 
 
 def sample(u, v):
+    """Билинейная интерполяция: смешиваем 4 ближайших текселя."""
     n = len(TEXTURE)
-    return TEXTURE[min(n - 1, max(0, int(v * n)))][min(n - 1, max(0, int(u * n)))]
+    x = min(1.0, max(0.0, u)) * (n - 1)
+    y = min(1.0, max(0.0, v)) * (n - 1)
+    x0, y0 = int(x), int(y)
+    x1, y1 = min(x0 + 1, n - 1), min(y0 + 1, n - 1)
+    fx, fy = x - x0, y - y0
+    color = []
+    for c in range(3):
+        top = TEXTURE[y0][x0][c] * (1 - fx) + TEXTURE[y0][x1][c] * fx
+        bottom = TEXTURE[y1][x0][c] * (1 - fx) + TEXTURE[y1][x1][c] * fx
+        color.append(int(top * (1 - fy) + bottom * fy))
+    return "#%02x%02x%02x" % tuple(color)
 
 
-def assign_uv(poly):
-    for face in poly.faces:
-        n = len(face.indices)
-        if n == 3:
-            uvs = [(0, 0), (1, 0), (0.5, 1)]
-        elif n == 4:
-            uvs = [(0, 0), (1, 0), (1, 1), (0, 1)]
-        else:  # остальные многоугольники: вписываем в окружность
-            uvs = [(0.5 + 0.5 * math.cos(2 * math.pi * i / n),
-                    0.5 + 0.5 * math.sin(2 * math.pi * i / n)) for i in range(n)]
-        face.uv = dict(zip(face.indices, uvs))
+def inside(px, py, polygon):
+    """Точка внутри выпуклого многоугольника: все векторные произведения одного знака."""
+    signs = []
+    for (x0, y0), (x1, y1) in zip(polygon, polygon[1:] + polygon[:1]):
+        signs.append((x1 - x0) * (py - y0) - (y1 - y0) * (px - x0))
+    return all(s >= 0 for s in signs) or all(s <= 0 for s in signs)
 
 
-def draw_triangle(buffer, a, b, c):
-    (x0, y0, s0, us0, vs0), (x1, y1, s1, us1, vs1), (x2, y2, s2, us2, vs2) = a, b, c
-    den = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
-    if abs(den) < 1e-9:
-        return
-    for y in range(max(0, int(min(y0, y1, y2))), min(SIZE - 1, int(max(y0, y1, y2)) + 1) + 1):
-        for x in range(max(0, int(min(x0, x1, x2))), min(SIZE - 1, int(max(x0, x1, x2)) + 1) + 1):
-            px, py = x + 0.5, y + 0.5
-            la = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) / den
-            lb = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) / den
-            lc = 1 - la - lb
-            if la < -1e-9 or lb < -1e-9 or lc < -1e-9:
+def draw_face(buffer, view_points, perspective, k, distance):
+    """Текстурирование грани по лекции: p = a + u*e1 + v*e2.
+    Вершинам соответствуют текстурные координаты: P1 -> (0,0), P2 -> (1,0),
+    последняя вершина (P4 у четырёхугольника) -> (0,1), P3 -> (1,1).
+    view_points - вершины в системе наблюдателя (x вправо, y вверх, z - глубина)."""
+    a = view_points[0]
+    e1 = sub(view_points[1], a)
+    e2 = sub(view_points[-1], a)
+
+    # положение вершин на экране
+    dk = distance * k
+    if perspective:
+        screen = [(SIZE / 2 + x / z * dk, SIZE / 2 - y / z * dk) for x, y, z in view_points]
+        n, m, l = cross(e1, e2), cross(e2, a), cross(a, e1)  # для правила Крамера
+    else:
+        screen = [(SIZE / 2 + x * k, SIZE / 2 - y * k) for x, y, z in view_points]
+        det = e1[0] * e2[1] - e1[1] * e2[0]
+        if abs(det) < 1e-9:  # грань видна ребром
+            return
+
+    xs, ys = [p[0] for p in screen], [p[1] for p in screen]
+    for py in range(max(0, int(min(ys))), min(SIZE - 1, int(max(ys)) + 1) + 1):
+        for px in range(max(0, int(min(xs))), min(SIZE - 1, int(max(xs)) + 1) + 1):
+            if not inside(px + 0.5, py + 0.5, screen):
                 continue
-            s = la * s0 + lb * s1 + lc * s2
-            u = (la * us0 + lb * us1 + lc * us2) / s
-            v = (la * vs0 + lb * vs1 + lc * vs2) / s
-            buffer[y][x] = sample(u, v)
+            if perspective:
+                # X = x/z, Y = y/z - координаты пикселя на плоскости изображения
+                X, Y = (px + 0.5 - SIZE / 2) / dk, (SIZE / 2 - py - 0.5) / dk
+                delta = X * n[0] + Y * n[1] + n[2]
+                if abs(delta) < 1e-12:
+                    continue
+                u = (X * m[0] + Y * m[1] + m[2]) / delta
+                v = (X * l[0] + Y * l[1] + l[2]) / delta
+            else:
+                # параллельная проекция: решаем систему 2x2 по правилу Крамера
+                dx = (px + 0.5 - SIZE / 2) / k - a[0]
+                dy = (SIZE / 2 - py - 0.5) / k - a[1]
+                u = (dx * e2[1] - dy * e2[0]) / det
+                v = (e1[0] * dy - e1[1] * dx) / det
+            buffer[py][px] = sample(u, v)
 
 
 class Application(ttk.Frame):
@@ -180,8 +216,7 @@ class Application(ttk.Frame):
     def select_figure(self, event=None):
         poly = POLYHEDRONS[self.figure_name.get()]()
         c = poly.get_center()
-        self.polyhedron = task2.translate(poly, -c.x, -c.y, -c.z)
-        assign_uv(self.polyhedron)
+        self.polyhedron = task2.translate(poly, -c.x, -c.y, -c.z)  # центр в начало координат
         self.radius = max(math.sqrt(p.x ** 2 + p.y ** 2 + p.z ** 2)
                           for p in self.polyhedron.vertices)
         self.redraw()
@@ -203,14 +238,6 @@ class Application(ttk.Frame):
         camera = tuple(c * distance for c in VIEW)
         k = SIZE / (2.4 * self.radius)
 
-        def project(p, uv):
-            depth = distance - dot(p, VIEW)
-            if perspective and depth <= 0:
-                return None
-            s = distance / depth if perspective else 1.0
-            return (SIZE / 2 + dot(p, RIGHT) * s * k, SIZE / 2 - dot(p, UP) * s * k,
-                    s, uv[0] * s, uv[1] * s)
-
         buffer = [["#ffffff"] * SIZE for _ in range(SIZE)]
         vertices = self.polyhedron.vertices
         center = xyz(self.polyhedron.get_center())
@@ -218,6 +245,7 @@ class Application(ttk.Frame):
             points = [xyz(vertices[i]) for i in face.indices]
             face_center = tuple(sum(c) / len(points) for c in zip(*points))
 
+            # Отсечение нелицевых граней (как в лабораторной 8)
             n = face.get_normal(vertices)
             if dot(n, sub(face_center, center)) < 0:
                 n = (-n[0], -n[1], -n[2])
@@ -225,11 +253,11 @@ class Application(ttk.Frame):
             if dot(n, to_viewer) <= 0:
                 continue
 
-            projected = [project(p, face.uv[i]) for p, i in zip(points, face.indices)]
-            if None in projected:
+            # переходим в систему наблюдателя: x вправо, y вверх, z - расстояние до камеры
+            view_points = [(dot(p, RIGHT), dot(p, UP), distance - dot(p, VIEW)) for p in points]
+            if perspective and any(z <= 0 for _, _, z in view_points):
                 continue
-            for i in range(1, len(projected) - 1):
-                draw_triangle(buffer, projected[0], projected[i], projected[i + 1])
+            draw_face(buffer, view_points, perspective, k, distance)
 
         self.image = tk.PhotoImage(width=SIZE, height=SIZE)
         self.image.put(" ".join("{" + " ".join(row) + "}" for row in buffer))
